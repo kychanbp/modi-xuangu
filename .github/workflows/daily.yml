@@ -1,0 +1,45 @@
+name: daily-ma60-screen
+on:
+  schedule:
+    - cron: "0 22 * * *"      # 06:00 Singapore time, after the daily data release
+  workflow_dispatch:
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+concurrency:
+  group: daily-ma60-screen
+  cancel-in-progress: false
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
+          pip install -q numpy pandas matplotlib
+      - name: Download latest A-share bundle
+        run: |
+          curl -sSL -o qlib_bin.tar.gz https://github.com/chenditc/investment_data/releases/latest/download/qlib_bin.tar.gz
+          mkdir qlib_data && tar -xzf qlib_bin.tar.gz -C qlib_data --strip-components=1
+          rm qlib_bin.tar.gz
+      - name: Screen (60日线第三次磨底)
+        run: python ma60.py --qlib qlib_data --out site --history history
+      - name: Save history
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add history
+          git diff --cached --quiet || (git commit -q -m "screen: $(ls history | tail -1 | cut -d. -f1)" && git push)
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

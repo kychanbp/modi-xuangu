@@ -1,0 +1,4 @@
+site/
+qlib_data/
+*.tar.gz
+__pycache__/

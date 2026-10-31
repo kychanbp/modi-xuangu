@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>波浪选股 每日筛选</title>
+<style>
+:root{--bg:#f6f6f2;--surface:#fff;--fg:#1f2427;--muted:#5f686c;--line:#dfe1dc;--buy:#c0392b;--watch:#b5651d}
+@media (prefers-color-scheme:dark){:root{--bg:#15191b;--surface:#1d2326;--fg:#e7eae8;--muted:#9aa3a7;--line:#333b3e;--buy:#f0776a;--watch:#f0a868;color-scheme:dark}}
+body{background:var(--bg);color:var(--fg);font-family:"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;font-size:15px;line-height:1.65;margin:0}
+main{max-width:960px;margin:0 auto;padding:28px 16px 64px;display:flex;flex-direction:column;gap:28px}
+h1{font-size:1.7rem;margin:0}h2{font-size:1.2rem;margin:0 0 8px}h3{margin:0;font-size:1rem}
+.stats{display:flex;flex-wrap:wrap;gap:10px}.stat{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:8px 14px}
+.stat b{display:block;font-size:1.3rem}.stat span{font-size:.8rem;color:var(--muted)}
+.grid{display:flex;flex-direction:column;gap:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.card header{display:flex;gap:10px;align-items:center}.badge{font-size:.75rem;padding:1px 8px;border-radius:999px;border:1px solid currentColor}
+.badge.buy{color:var(--buy)}.badge.watch{color:var(--watch)}.why{margin:0;font-weight:500}
+.card img{width:100%;background:#fff;border-radius:4px}
+dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:4px 12px;margin:0}dl div{display:flex;flex-direction:column}
+dt{font-size:.75rem;color:var(--muted)}dd{margin:0}
+table{border-collapse:collapse;width:100%;font-size:.88rem;background:var(--surface)}th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left}
+.tbl{overflow-x:auto}.empty{color:var(--muted)}details{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:10px 14px}
+.small{font-size:.85rem;color:var(--muted)}
+</style></head><body><main>
+<header><h1>磨底选股 · 60日线第三次磨底</h1><p class="small">数据日期 {{DAY}}（收盘）· 每天新加坡时间早上 6 点自动更新 · 另见 <a href="https://kychanbp.github.io/bolang-xuangu/">波浪选股</a></p></header>
+<div class="stats"><div class="stat"><b>{{NB}}</b><span>今天的买点</span></div><div class="stat"><b>{{NW}}</b><span>观察（还差一根阳线）</span></div>
+<div class="stat"><b>{{N}}</b><span>检查股票数</span></div></div>
+<section><h2>今天的买点</h2><div class="grid">{{BUYS}}</div></section>
+<section><h2>观察：第 3 个底，阴线已够，还差阳线</h2><p class="small">已满足全部规则，只差一根阳线。下一个交易日如果收阳线、收盘仍在 60 日线下方，就是买点。</p><div class="grid">{{WATCH}}</div></section>
+<details><summary>规则说明</summary>
+<ol><li>月线（最近 36 个完整月）：上涨段（36 个月最高点及其之前的最低点）中，阳线月平均实体 ≥ 阴线月平均实体的 1.5 倍。</li>
+<li>周线：上涨段起点开始的第一波（8–20 周，到最高点）中，阳线周实体合计 ≥ 阴线周实体合计的 2 倍；至少 70% 的阴线周实体在前一根阳线周的高低范围内。</li>
+<li>放量站上 60 日线：最近 250 个交易日内，收盘从 60 日线下方升到上方，当天量 ≥ 前 20 日均量的 2 倍。</li>
+<li>缩量跌回 60 日线下方：从站上后的最高收盘价到跌回 60 日线下方，平均量小于从站上到最高价的平均量。</li>
+<li>在 60 日线下方的这一段中，每一波下跌的平均量比前一波小（允许 1 次例外）。</li>
+<li>今天是这一段的第 3 个底（底 = 前后各 5 根 K 线中最低的低点）。</li>
+<li>两个底之间至少有一个"小山"：连续 ≥ 4 根阳线，或从前一个底的低点上涨 ≥ 20%。</li>
+<li>第 3 个底：连续 ≥ 4 根阴线，每根的成交量都小于前面小山的平均量；然后今天收一根阳线，收盘在 60 日线下方。按今天收盘价买入。</li>
+<li>同一段只算第一个买点。</li></ol>
+<p class="small">范围：沪深 A 股（含创业板、科创板），不含北交所；上市不满 250 个交易日的不检查。数据中没有 ST 标记，ST 股未排除。规则用复权价计算；页面显示不复权价。</p>
+</details>
+<p class="small">数据来源：github.com/chenditc/investment_data（社区 Qlib A 股数据）。仅供研究，不构成投资建议。历史回测（2008–2026，约 350 次）：用"涨 10% 卖出、跌 5% 补仓"的卖法，每笔比同日随机买入的 A 股多 0.9 个百分点（t ≈ 2.2，20 次随机抽样），但结果不稳定：规则稍改或用固定持有天数，优势就消失。</p>
+</main></body></html>
