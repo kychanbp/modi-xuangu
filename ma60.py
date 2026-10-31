@@ -96,17 +96,19 @@ def m2_w1(mb, wb, mid, wid, q=RULES):
     e = int(np.searchsorted(mb["id"], mid))
     b = max(int(np.searchsorted(mb["id"], mid - q["m_window"])), 0)
     if e - b < q["m_min_months"]:
-        return False, False
+        return False, False, {}
     hm = b + int(np.argmax(mb["h"][b:e]))
     lm = b + int(np.argmin(mb["l"][b:hm + 1]))
     oo, cc = mb["o"][lm:hm + 1], mb["c"][lm:hm + 1]
     up, dn = cc > oo, cc < oo
     body = np.abs(cc - oo) / oo
     m2 = bool(not dn.any() or (up.any() and body[up].mean() >= q["m_body"] * body[dn].mean()))
+    info = dict(m2_ratio=float(body[up].mean() / body[dn].mean()) if up.any() and dn.any() else float("inf"),
+                m_up=int(up.sum()), m_dn=int(dn.sum()), m_from=int(mb["id"][lm]), m_to=int(mb["id"][hm]))
     ws = int(np.searchsorted(wb["day0"], int(mb["lowday"][lm]), side="right")) - 1
     last = min(ws + q["w_max"] - 1, int(np.searchsorted(wb["id"], wid)) - 1)
     if ws < 0 or last < ws:
-        return m2, False
+        return m2, False, info
     we = max(ws + int(np.argmax(wb["h"][ws:last + 1])), min(ws + q["w_min"] - 1, last))
     o, c, h, l = (wb[x][ws:we + 1] for x in ("o", "c", "h", "l"))
     up, dn = c > o, c < o
@@ -120,7 +122,9 @@ def m2_w1(mb, wb, mid, wid, q=RULES):
         elif up[i]:
             lastup = i
     w1 = bool(body[up].sum() >= q["w_body"] * body[dn].sum() and (nd == 0 or ins / nd >= q["w_inside"]))
-    return m2, w1
+    info.update(w1_ratio=float(body[up].sum() / body[dn].sum()) if dn.any() else float("inf"),
+                w1_inside=ins / nd if nd else 1.0, w_weeks=int(we - ws + 1))
+    return m2, w1, info
 
 
 # ---------------------------------------------------------------- daily rules
@@ -151,16 +155,17 @@ def daily(o, h, lw, c, v, ma, isd1, piv, down, s, t, q=RULES, watch=False):
         if isd1[x]:
             d1 = x
             break
-    d2 = False
+    d2, d2_after, d2_before = False, np.nan, np.nan
     if d1 >= 0:
         pk = d1
         for x in range(d1, s):
             if c[x] > c[pk]:
                 pk = x
-        d2 = v[pk + 1:s + 1].mean() < v[d1:pk + 1].mean()
+        d2_after, d2_before = v[pk + 1:s + 1].mean(), v[d1:pk + 1].mean()
+        d2 = d2_after < d2_before
     bl = [x for x in range(s, bs) if piv[x] and x + pv <= (t if watch else tt)] + [bs]
     k = len(bl)
-    viol, prev, st = 0, -1.0, s
+    viol, prev, st, waves = 0, -1.0, s, []
     for i, b in enumerate(bl):
         pk = st
         for x in range(st, b):
@@ -169,6 +174,7 @@ def daily(o, h, lw, c, v, ma, isd1, piv, down, s, t, q=RULES, watch=False):
         mv = v[pk + 1:b + 1].mean() if b > pk else v[b]
         if i > 0 and not (mv < prev):
             viol += 1
+        waves.append(float(mv))
         prev, st = mv, b + 1
     b_prev = bl[-2] if k > 1 else s
     pk = b_prev
@@ -177,7 +183,7 @@ def daily(o, h, lw, c, v, ma, isd1, piv, down, s, t, q=RULES, watch=False):
             pk = x
     hv = v[b_prev + 1:pk + 1].mean() if pk > b_prev else v[r0 - 1]
     vhill = bool((v[r0:r0 + L] < hv).all())
-    nu = 0
+    nu, gaps = 0, []
     for i in range(1, k):
         b0, b1 = bl[i - 1], bl[i]
         gh = max(h[b0], h[b0 + 1:b1 + 1].max())
@@ -185,9 +191,13 @@ def daily(o, h, lw, c, v, ma, isd1, piv, down, s, t, q=RULES, watch=False):
         for x in range(b0 + 1, b1 + 1):
             urun = urun + 1 if c[x] > o[x] else 0
             best = max(best, urun)
-        if best >= q["hill_uprun"] or gh / lw[b0] - 1 >= q["hill_rise"]:
+        ok = best >= q["hill_uprun"] or gh / lw[b0] - 1 >= q["hill_rise"]
+        if ok:
             nu += 1
-    return dict(L=L, bs=bs, d1=d1, d2=bool(d2), k=k, bottoms=bl, d3viol=viol, vhill=vhill, hill=nu >= 1)
+        gaps.append(dict(b0=b0, b1=b1, uprun=int(best), rise=float(gh / lw[b0] - 1), ok=bool(ok)))
+    return dict(L=L, bs=bs, d1=d1, d2=bool(d2), k=k, bottoms=bl, d3viol=viol, vhill=vhill, hill=nu >= 1,
+                r0=r0, d2_ratio=float(d2_after / d2_before) if d1 >= 0 else np.nan, waves=waves, gaps=gaps,
+                run_vol_ratio=float(v[r0:r0 + L].max() / hv), hill_b=b_prev, hill_pk=pk)
 
 
 def daily_ok(r, q=RULES):
@@ -224,9 +234,9 @@ def check(j, p, mkey, wkey, q=RULES):
 
     def flags(x):
         if x not in mw:
-            m2, w1 = m2_w1(mb, wb, mkey[idx[min(x, m - 1)]], wkey[idx[min(x, m - 1)]], q)
-            mw[x] = m2 and (w1 or not q["need_w1"])
-        return mw[x]
+            m2, w1, info = m2_w1(mb, wb, mkey[idx[min(x, m - 1)]], wkey[idx[min(x, m - 1)]], q)
+            mw[x] = (m2 and (w1 or not q["need_w1"]), dict(info, m2=m2, w1=w1))
+        return mw[x][0]
 
     mb = bars(idx, o, h, lw, c, v, mkey[idx])
     wb = bars(idx, o, h, lw, c, v, wkey[idx])
@@ -249,7 +259,8 @@ def check(j, p, mkey, wkey, q=RULES):
         kind = "watch"
     D = p["dates"]
     f = float(p["factor"][T, j])
-    return dict(code=str(p["codes"][j]), kind=kind, j=j, idx=idx, ma=ma, s=s, t=t, r=r,
+    r = dict(r, d1_vol_ratio=float(v[r["d1"]] / va[r["d1"]]), mw=mw[t][1])
+    return dict(code=str(p["codes"][j]), kind=kind, j=j, idx=idx, ma=ma, s=s, t=t, r=r, q=q,
                 close_px=c[t] / f, ma60_px=ma[t] / f, below_ma60=c[t] / ma[t] - 1,
                 stretch_start=str(D[idx[s]].date()), d1_date=str(D[idx[r["d1"]]].date()),
                 bottoms=";".join(str(D[idx[b]].date()) for b in r["bottoms"]), down_candles=r["L"], d3viol=r["d3viol"])
@@ -269,7 +280,8 @@ def chart(r, p, path):
     plt.rcParams.update({"axes.unicode_minus": False, "font.size": 9})
     j, idx, ma, rr = r["j"], r["idx"], r["ma"], r["r"]
     o, h, l, c, v = (p[k][idx, j] for k in ("open", "high", "low", "close", "volume"))
-    a, b = max(rr["d1"] - 40, 0), r["t"]
+    # window: the stretch below MA60 plus 60 days before it (and the D1 day when it is near)
+    a, b = max(min(rr["d1"] - 10, r["s"] - 60) if rr["d1"] >= r["s"] - 90 else r["s"] - 60, 0), r["t"]
     x = np.arange(b - a + 1)
     fig, (ax, axv) = plt.subplots(2, 1, figsize=(10, 4.2), sharex=True, gridspec_kw={"height_ratios": [3, 1]})
     for i in range(a, b + 1):
@@ -279,13 +291,31 @@ def chart(r, p, path):
         axv.bar(i - a, v[i], color=col, width=0.7)
     ax.plot(x, ma[a:b + 1], color="#0984e3", lw=1.1, label="MA60")
     ymin, ymax = np.nanmin(l[a:b + 1]), np.nanmax(h[a:b + 1])
-    ax.axvline(rr["d1"] - a, color="#e67e22", lw=0.7, ls="--")
-    ax.text(rr["d1"] - a + 0.5, ymax * 1.06, "放量站上60日线", color="#e67e22", fontsize=8, va="top")
+    if rr["d1"] >= a:
+        ax.axvline(rr["d1"] - a, color="#e67e22", lw=0.7, ls="--")
+        ax.text(rr["d1"] - a + 0.5, ymax * 1.06, "放量站上60日线", color="#e67e22", fontsize=8, va="top")
+    else:
+        ax.text(0, ymax * 1.06, f"← 放量站上60日线 {r['d1_date']}（图外）", color="#e67e22", fontsize=8, va="top")
     ax.axvspan(r["s"] - a - 0.5, b - a + 0.5, color="#0984e3", alpha=0.05)
     for n, bt in enumerate(rr["bottoms"], 1):
         ax.annotate(f"底{n}", (bt - a, l[bt]), (bt - a, l[bt] - (ymax - ymin) * 0.06), ha="center", fontsize=8,
                     color="#6c5ce7", arrowprops=dict(arrowstyle="-", color="#6c5ce7", lw=0.6))
-    ax.set_ylim(ymin - (ymax - ymin) * 0.12, ymax * 1.08)
+    for g in rr["gaps"]:
+        if g["ok"]:
+            ax.axvspan(g["b0"] - a - 0.5, g["b1"] - a + 0.5, color="#e17055", alpha=0.08)
+            ax.text((g["b0"] + g["b1"]) / 2 - a, ymax * 1.0, f"小山丘\n{g['uprun']}连阳 / +{g['rise']*100:.0f}%",
+                    ha="center", va="top", fontsize=7.5, color="#e17055")
+    r0, L = rr["r0"], rr["L"]
+    ax.axvspan(r0 - a - 0.5, r0 + L - 1 - a + 0.5, color="#20a162", alpha=0.12)
+    axv.axvspan(r0 - a - 0.5, r0 + L - 1 - a + 0.5, color="#20a162", alpha=0.12)
+    if rr["hill_pk"] > rr["hill_b"]:
+        axv.hlines(v[rr["hill_b"] + 1:rr["hill_pk"] + 1].mean(), rr["hill_b"] + 1 - a, r0 + L - 1 - a, color="#e17055",
+                   lw=0.8, ls="--")
+    axv.text(r0 - a - 1, axv.get_ylim()[1] * 0.95, f"{L}根缩量阴线", fontsize=7.5, color="#20a162", ha="right", va="top")
+    if r["kind"] == "signal":
+        ax.annotate("买点", (b - a, l[b]), (b - a, l[b] - (ymax - ymin) * 0.09), ha="center", fontsize=8,
+                    color="#d63031", fontweight="bold", arrowprops=dict(arrowstyle="->", color="#d63031", lw=0.8))
+    ax.set_ylim(ymin - (ymax - ymin) * 0.14, ymax * 1.08)
     ax.legend(loc="upper right", frameon=False, fontsize=8)
     ticks = list(range(0, b - a + 1, max((b - a) // 6, 1)))
     axv.set_xticks(ticks, [p["dates"][idx[a + t]].strftime("%Y-%m-%d") for t in ticks])
@@ -297,15 +327,49 @@ def chart(r, p, path):
     plt.close(fig)
 
 
+def criteria(r):
+    """(class, mark, text) for each rule: how the stock met it, with the rule's threshold."""
+    rr, q, mw = r["r"], r["q"], r["r"]["mw"]
+    ok = lambda b: ("ok", "✓") if b else ("no", "✗")
+    skip = ("skip", "–")
+    x = lambda v: "∞" if not np.isfinite(v) else f"{v:.1f}"
+    out = [(*ok(mw.get("m2", False)), f"月线：上涨段阳线月平均实体 = 阴线月的 {x(mw.get('m2_ratio', np.nan))} 倍"
+            f"（要求 ≥ {q['m_body']}）")]
+    w1 = (f"周线：第一波 {mw.get('w_weeks', '?')} 周，阳线周实体合计 = 阴线周的 {x(mw.get('w1_ratio', np.nan))} 倍"
+          f"（要求 ≥ {q['w_body']:.0f}）；{mw.get('w1_inside', 0)*100:.0f}% 阴线周在前一根阳线周范围内（要求 ≥ {q['w_inside']*100:.0f}%）")
+    out.append((*ok(mw.get("w1", False)), w1) if q["need_w1"] else (*skip, w1 + "；宽松版不检查"))
+    out.append((*ok(True), f"放量站上 60 日线：{r['d1_date']}，成交量 = 前 20 日均量的 {rr['d1_vol_ratio']:.1f} 倍"
+                f"（要求 ≥ {q['d1_vol']}）"))
+    d2 = f"缩量回落：回落段日均量 = 站上段的 {rr['d2_ratio']*100:.0f}%（要求 < 100%）"
+    out.append((*ok(rr["d2"]), d2) if q["need_d2"] else (*skip, d2 + "；宽松版不检查"))
+    out.append((*ok(rr["d3viol"] <= q["d3_exc"]), f"一浪比一浪缩量：{len(rr['waves'])} 波下跌，"
+                f"{rr['d3viol']} 次没有缩量（允许 ≤ {q['d3_exc']} 次）"))
+    out.append((*ok(True), f"底：今天是第 {rr['k']} 个底（要求第 {'或'.join(map(str, q['bottoms']))} 个）"))
+    g = [g for g in rr["gaps"] if g["ok"]]
+    if g:
+        g = g[-1]
+        out.append((*ok(True), f"小山丘：底{rr['gaps'].index(g)+1}→底{rr['gaps'].index(g)+2} 之间最多 {g['uprun']} 根连阳，"
+                    f"反弹 +{g['rise']*100:.0f}%（要求 ≥ {q['hill_uprun']} 根连阳 或 ≥ {q['hill_rise']*100:.0f}%）"))
+    out.append((*ok(True), f"缩量阴线：连续 {rr['L']} 根阴线，最大成交量 = 小山丘日均量的 {rr['run_vol_ratio']*100:.0f}%"
+                f"（要求 ≥ {q['run_min']} 根，都 < 100%）"))
+    if r["kind"] == "signal":
+        out.append((*ok(True), f"买点：今天收阳线，收盘低于 60 日线 {-r['below_ma60']*100:.1f}%"))
+    else:
+        out.append(("wait", "…", "买点：还差一根阳线，收盘必须在 60 日线下方"))
+    return out
+
+
 def page(day, n_checked, rows, out):
     def card(r):
         sig, k = r["kind"] == "signal", r["r"]["k"]
         why = (f"今天是第 {k} 个底，前面 {r['down_candles']} 根缩量阴线，今天收阳线（收盘在 60 日线下方）" if sig else
                f"第 {k} 个底已有 {r['down_candles']} 根缩量阴线，还差一根阳线（收盘须在 60 日线下方）")
         tag = ("" if r["tier"] == "strict" else "宽松版") + ("买点" if sig else "观察")
+        crit = "".join(f'<li class="{c}"><span>{m}</span>{t}</li>' for c, m, t in criteria(r))
         return f'''<article class="card"><header><span class="badge {"buy" if sig else "watch"}">{tag}</span>
 <h3>{r["code"]}</h3></header><p class="why">{why}</p>
 <img loading="lazy" src="charts/{r["code"]}.png" alt="{r["code"]} 日K线">
+<ul class="crit">{crit}</ul>
 <dl><div><dt>收盘价</dt><dd>{r["close_px"]:.2f}</dd></div><div><dt>60 日线</dt><dd>{r["ma60_px"]:.2f}</dd></div>
 <div><dt>低于 60 日线</dt><dd>{r["below_ma60"]*100:.1f}%</dd></div><div><dt>放量站上 60 日线</dt><dd>{r["d1_date"]}</dd></div>
 <div><dt>跌回 60 日线下方</dt><dd>{r["stretch_start"]}</dd></div><div><dt>{k} 个底</dt><dd>{r["bottoms"].replace(";", "<br>")}</dd></div></dl></article>'''

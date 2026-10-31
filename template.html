@@ -19,6 +19,9 @@ dt{font-size:.75rem;color:var(--muted)}dd{margin:0}
 table{border-collapse:collapse;width:100%;font-size:.88rem;background:var(--surface)}th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left}
 .tbl{overflow-x:auto}.empty{color:var(--muted)}details{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:10px 14px}
 .small{font-size:.85rem;color:var(--muted)}
+.crit{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:.86rem}
+.crit li{display:grid;grid-template-columns:1.4em minmax(0,1fr);gap:4px}.crit li span{font-weight:700;text-align:center}
+.crit .ok span{color:#20a162}.crit .no span{color:var(--buy)}.crit .skip,.crit .wait{color:var(--muted)}
 </style></head><body><main>
 <header><h1>磨底选股 · 60日线第三次磨底</h1><p class="small">数据日期 {{DAY}}（收盘）· 每天新加坡时间早上 6 点自动更新 · 另见 <a href="https://kychanbp.github.io/bolang-xuangu/">波浪选股</a></p></header>
 <div class="stats"><div class="stat"><b>{{NB}}</b><span>严格版买点</span></div><div class="stat"><b>{{NR}}</b><span>宽松版买点</span></div><div class="stat"><b>{{NW}}</b><span>观察（还差一根阳线）</span></div>
