@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>波浪选股 每日筛选</title>
+<title>磨底选股 每日筛选</title>
 <style>
 :root{--bg:#f6f6f2;--surface:#fff;--fg:#1f2427;--muted:#5f686c;--line:#dfe1dc;--buy:#c0392b;--watch:#b5651d}
 @media (prefers-color-scheme:dark){:root{--bg:#15191b;--surface:#1d2326;--fg:#e7eae8;--muted:#9aa3a7;--line:#333b3e;--buy:#f0776a;--watch:#f0a868;color-scheme:dark}}
@@ -21,10 +21,12 @@ table{border-collapse:collapse;width:100%;font-size:.88rem;background:var(--surf
 .small{font-size:.85rem;color:var(--muted)}
 </style></head><body><main>
 <header><h1>磨底选股 · 60日线第三次磨底</h1><p class="small">数据日期 {{DAY}}（收盘）· 每天新加坡时间早上 6 点自动更新 · 另见 <a href="https://kychanbp.github.io/bolang-xuangu/">波浪选股</a></p></header>
-<div class="stats"><div class="stat"><b>{{NB}}</b><span>今天的买点</span></div><div class="stat"><b>{{NW}}</b><span>观察（还差一根阳线）</span></div>
+<div class="stats"><div class="stat"><b>{{NB}}</b><span>严格版买点</span></div><div class="stat"><b>{{NR}}</b><span>宽松版买点</span></div><div class="stat"><b>{{NW}}</b><span>观察（还差一根阳线）</span></div>
 <div class="stat"><b>{{N}}</b><span>检查股票数</span></div></div>
-<section><h2>今天的买点</h2><div class="grid">{{BUYS}}</div></section>
-<section><h2>观察：第 3 个底，阴线已够，还差阳线</h2><p class="small">已满足全部规则，只差一根阳线。下一个交易日如果收阳线、收盘仍在 60 日线下方，就是买点。</p><div class="grid">{{WATCH}}</div></section>
+<section><h2>今天的买点（严格版）</h2><div class="grid">{{BUYS}}</div></section>
+<section><h2>宽松版买点</h2><p class="small">宽松版：不看周线和缩量跌回（规则 2、4）；月线 1.2 倍；第 2 或第 3 个底；连续 ≥ 3 根缩量阴线；小山 ≥ 4 根阳线或涨 ≥ 15%；放量 ≥ 1.5 倍。已在严格版中的股票不重复列出。</p>
+<p class="small">宽松版回测（2009–2026-10，约 12,900 次，平均每年约 690 次）：用"涨 10% 卖出、跌 5% 补仓"的卖法，每笔只比同日随机买入的 A 股多 0.1 个百分点（t ≈ 0.4，20 次随机抽样），没有优势；固定持有 5 天和 20 天分别多 0.4 和 0.7 个百分点（t ≈ 2.8 和 2.9）。10 只股票的组合年化 6.5%，随机组合中位数 6.6%，中证 1000 为 5.3%。</p><div class="grid">{{RBUYS}}</div></section>
+<section><h2>观察：阴线已够，还差阳线（严格版和宽松版）</h2><p class="small">已满足该版本的全部规则，只差一根阳线。下一个交易日如果收阳线、收盘仍在 60 日线下方，就是买点。</p><div class="grid">{{WATCH}}</div></section>
 <details><summary>规则说明</summary>
 <ol><li>月线（最近 36 个完整月）：上涨段（36 个月最高点及其之前的最低点）中，阳线月平均实体 ≥ 阴线月平均实体的 1.5 倍。</li>
 <li>周线：上涨段起点开始的第一波（8–20 周，到最高点）中，阳线周实体合计 ≥ 阴线周实体合计的 2 倍；至少 70% 的阴线周实体在前一根阳线周的高低范围内。</li>
