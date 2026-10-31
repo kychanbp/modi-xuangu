@@ -24,13 +24,13 @@ table{border-collapse:collapse;width:100%;font-size:.88rem;background:var(--surf
 .crit .ok span{color:#20a162}.crit .no span{color:var(--buy)}.crit .skip,.crit .wait{color:var(--muted)}
 </style></head><body><main>
 <header><h1>磨底选股 · 60日线第三次磨底</h1><p class="small">数据日期 {{DAY}}（收盘）· 每天新加坡时间早上 6 点自动更新 · 另见 <a href="https://kychanbp.github.io/bolang-xuangu/">波浪选股</a></p></header>
-<div class="stats"><div class="stat"><b>{{NB}}</b><span>严格版买点</span></div><div class="stat"><b>{{NR}}</b><span>宽松版买点</span></div><div class="stat"><b>{{NW}}</b><span>观察（还差一根阳线）</span></div>
+<div class="stats"><div class="stat"><b>{{NB}}</b><span>严格版买点</span></div><div class="stat"><b>{{NE}}</b><span>例子版买点</span></div><div class="stat"><b>{{NW}}</b><span>观察（还差一根阳线）</span></div>
 <div class="stat"><b>{{N}}</b><span>检查股票数</span></div></div>
 <section><h2>今天的买点（严格版）</h2><div class="grid">{{BUYS}}</div></section>
-<section><h2>宽松版买点</h2><p class="small">宽松版：不看周线和缩量跌回（规则 2、4）；月线 1.2 倍；第 2 或第 3 个底；连续 ≥ 3 根缩量阴线；小山 ≥ 4 根阳线或涨 ≥ 15%；放量 ≥ 1.5 倍。已在严格版中的股票不重复列出。</p>
-<p class="small">宽松版回测（2009–2026-10，约 12,900 次，平均每年约 690 次）：用"涨 10% 卖出、跌 5% 补仓"的卖法，每笔只比同日随机买入的 A 股多 0.1 个百分点（t ≈ 0.4，20 次随机抽样），没有优势；固定持有 5 天和 20 天分别多 0.4 和 0.7 个百分点（t ≈ 2.8 和 2.9）。10 只股票的组合年化 6.5%，随机组合中位数 6.6%，中证 1000 为 5.3%。</p><div class="grid">{{RBUYS}}</div></section>
-<section><h2>观察：阴线已够，还差阳线（严格版和宽松版）</h2><p class="small">已满足该版本的全部规则，只差一根阳线。下一个交易日如果收阳线、收盘仍在 60 日线下方，就是买点。</p><div class="grid">{{WATCH}}</div></section>
-<details><summary>规则说明</summary>
+<section><h2>例子版买点</h2><p class="small">例子版是按作者给的 10 个例子重写的规则，重点是买点前成交量非常少：比一年最高价低 ≥ 30%；最近 60 天至少 30 天收盘在 60 日线下方；买点前 5 天平均量 ≤ 一年中最高 20 日均量的 20%，并且是最近 120 天里最低的 15%；连续 ≥ 2 根阴线创 20 天新低；今天收阳线，收盘不高于 60 日线。20 天内只算第一次。按缩量程度排序，只画前 20 只的图。已在严格版中的股票不重复列出。</p>
+<p class="small">例子版能找出 10 个例子中的 6 个。回测（2008–2026，约 35,000 次，平均每年约 1,800 次，有时一天几十只）：持有 20 天和 60 天平均比市场多 0.2 和 0.7 个百分点，"涨 10% 卖出、跌 5% 补仓"比同日随机买入多 0.5 个百分点；但按月算只有约一半的月份更好，没有稳定优势。</p><div class="grid">{{EBUYS}}</div></section>
+<section><h2>观察：阴线已够，还差阳线（严格版和例子版）</h2><p class="small">已满足该版本的全部规则，只差一根阳线。下一个交易日如果收阳线、收盘仍在 60 日线下方，就是买点。</p><div class="grid">{{WATCH}}</div></section>
+<details><summary>严格版规则说明</summary>
 <ol><li>月线（最近 36 个完整月）：上涨段（36 个月最高点及其之前的最低点）中，阳线月平均实体 ≥ 阴线月平均实体的 1.5 倍。</li>
 <li>周线：上涨段起点开始的第一波（8–20 周，到最高点）中，阳线周实体合计 ≥ 阴线周实体合计的 2 倍；至少 70% 的阴线周实体在前一根阳线周的高低范围内。</li>
 <li>放量站上 60 日线：最近 250 个交易日内，收盘从 60 日线下方升到上方，当天量 ≥ 前 20 日均量的 2 倍。</li>

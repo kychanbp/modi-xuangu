@@ -26,8 +26,11 @@ Rules (each stock on its own trading days; defaults in RULES):
     up-week bodies >= 2x down-week bodies, and >= 70% of down weeks inside the prior up week's range.
  Only the first signal of a stretch counts. "Watch": today is the 4th+ down candle of a run that meets
     every rule; it becomes a signal if the next candle is an up candle that closes at or below MA60.
-Tier R (宽松版, RULES_R): no W1 and no D2; M2 1.2x; the 2nd or 3rd bottom; 3+ down candles; hill 4+ up candles or
-    +15%; D1 volume >= 1.5x. A stock in the strict list is not repeated in tier R.
+Tier E (例子版, RULES_E), rebuilt from the author's examples: close >= 30% below the 250-day high; >= 30 of the last
+    60 closes below MA60; mean volume of the 5 days before today <= 20% of the highest 20-day mean volume of the last
+    250 days and in the lowest 15% of its last 120 values; >= 2 down candles in a row before today that made the
+    20-day low; today an up candle closing at or below MA60 (not limit-up). Only the first signal in 20 days counts.
+    A stock in the strict list is not repeated in tier E.
 """
 import argparse
 from pathlib import Path
@@ -38,9 +41,9 @@ import pandas as pd
 RULES = dict(d1_lookback=250, d1_vol=2.0, pivot=5, run_min=4, bottom=3, d3_exc=1, hill_uprun=4, hill_rise=0.20,
              m_window=36, m_min_months=12, m_body=1.5, w_min=8, w_max=20, w_body=2.0, w_inside=0.70, min_listed=250,
              bottoms=(3,), need_d2=True, need_w1=True)
-RULES_R = {**RULES, "d1_vol": 1.5, "run_min": 3, "bottoms": (2, 3), "hill_rise": 0.15, "m_body": 1.2,
-           "need_d2": False, "need_w1": False}
-TIERS = {"strict": RULES, "relaxed": RULES_R}
+# 例子版 (example tier, 2026-10-31): rebuilt from the author's 10 examples; the key is very low volume before the buy
+RULES_E = dict(dd=-0.30, below_win=60, below_min=30, vb_days=5, peak_win=250, peak_avg=20, q_peak=0.20,
+               q_win=120, q_pct=0.15, run_min=2, low_win=20, gap=20, min_listed=250)
 WINDOW = 1000         # trading days loaded per stock (36 months of monthly bars + MA60 + D1 look-back)
 FIELDS = ["open", "high", "low", "close", "volume", "factor"]
 
@@ -266,6 +269,79 @@ def check(j, p, mkey, wkey, q=RULES):
                 bottoms=";".join(str(D[idx[b]].date()) for b in r["bottoms"]), down_candles=r["L"], d3viol=r["d3viol"])
 
 
+def ex_feats(o, h, lw, c, v, q=RULES_E):
+    """Example-tier facts on every day of one stock's trading days (value for buying at that day's close)."""
+    C, V, L = pd.Series(c), pd.Series(v), pd.Series(lw)
+    ma = C.rolling(60).mean()
+    f = pd.DataFrame(dict(ma=ma))
+    f["dd"] = C / pd.Series(h).rolling(q["peak_win"], min_periods=200).max() - 1
+    f["below"] = (C < ma).astype(float).rolling(q["below_win"]).sum().shift(1)
+    vb = V.rolling(q["vb_days"]).mean().shift(1)                    # the 5 days before today
+    peak = V.rolling(q["peak_avg"]).mean().rolling(q["peak_win"], min_periods=200).max()
+    f["vb"], f["peak"] = vb, peak
+    f["q_peak"] = vb / peak
+    f["vq"] = vb.rolling(q["q_win"], min_periods=100).quantile(q["q_pct"])
+    f["q_rank"] = vb.rolling(q["q_win"], min_periods=100).rank(pct=True)
+    down = (C < pd.Series(o)).values
+    run = np.zeros(len(c), int)
+    for i in range(1, len(c)):
+        run[i] = run[i - 1] + 1 if down[i - 1] else 0                # down candles in a row before today
+    f["run"] = run
+    f["newlow"] = L.rolling(q["vb_days"]).min().shift(1) <= L.rolling(q["low_win"]).min().shift(1) * 1.0001
+    f["up"] = c > o
+    return f
+
+
+def ex_ok(f, x, q=RULES_E, watch=False):
+    r = f.iloc[x]
+    base = (r.dd <= q["dd"] and r.below >= q["below_min"] and r.q_peak <= q["q_peak"] and r.vb <= r.vq
+            and r.run >= q["run_min"] and bool(r.newlow))
+    return bool(base if watch else base and r.up and c_le_ma(f, x))
+
+
+def c_le_ma(f, x):
+    return bool(f["c"].iloc[x] <= f["ma"].iloc[x])
+
+
+def check_ex(j, p, q=RULES_E):
+    """例子版 signal or watch row for stock j on the last panel day, or None."""
+    T = len(p["dates"]) - 1
+    cl = p["close"][:, j]
+    idx = np.flatnonzero(np.isfinite(cl))
+    m = len(idx)
+    if m < 300 or idx[-1] != T or T - p["first"][j] < q["min_listed"]:
+        return None
+    o, h, lw, c, v = (p[k][idx, j].astype(float) for k in ("open", "high", "low", "close", "volume"))
+    f = ex_feats(o, h, lw, c, v, q)
+    f["c"] = c
+    t = m - 1
+    chg = c[t] / c[t - 1] - 1
+    lim = 0.195 if str(p["codes"][j]).startswith(("SZ300", "SZ301", "SH688", "SH689")) else 0.095
+    if ex_ok(f, t, q) and not (chg >= lim and c[t] >= h[t] * 0.999):
+        if any(ex_ok(f, x, q) for x in range(max(t - q["gap"], 0), t)):
+            return None
+        kind = "signal"
+    else:
+        # watch: if tomorrow is an up candle at or below MA60, the rules hold (features measured through today)
+        if not (c[t] < o[t] and c[t] <= f["ma"].iloc[t]):
+            return None
+        g = ex_feats(np.r_[o, c[t]], np.r_[h, c[t]], np.r_[lw, c[t]], np.r_[c, c[t]], np.r_[v, v[t]], q)
+        g["c"] = np.r_[c, c[t]]
+        if not ex_ok(g, t + 1, q, watch=True) or any(ex_ok(f, x, q) for x in range(max(t - q["gap"], 0), t + 1)):
+            return None
+        f = g
+        kind = "watch"
+    D, fac = p["dates"], float(p["factor"][T, j])
+    k = t if kind == "signal" else t + 1
+    rr = f.iloc[k]
+    run = int(rr.run)
+    return dict(code=str(p["codes"][j]), kind=kind, tier="example", j=j, idx=idx, ma=f["ma"].values[:m], t=t, q=q,
+                close_px=c[t] / fac, ma60_px=f["ma"].iloc[t] / fac, below_ma60=c[t] / f["ma"].iloc[t] - 1,
+                dd=float(rr.dd), below=int(rr.below), q_peak=float(rr.q_peak), q_rank=float(rr.q_rank), run=run,
+                vb=float(rr.vb), peak=float(rr.peak), run0=k - run, stretch_start="", d1_date="", bottoms="",
+                down_candles=run, d3viol="")
+
+
 # ---------------------------------------------------------------- output
 def chart(r, p, path):
     import matplotlib
@@ -359,12 +435,83 @@ def criteria(r):
     return out
 
 
-def page(day, n_checked, rows, out):
+def chart_ex(r, p, path):
+    """例子版 chart: last ~180 days, MA60, the quiet 5 days and the down candles; volume panel with the 20%-of-peak line."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib import font_manager
+    for f in ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/System/Library/Fonts/Hiragino Sans GB.ttc"):
+        if Path(f).exists():
+            font_manager.fontManager.addfont(f)
+            plt.rcParams["font.family"] = font_manager.FontProperties(fname=f).get_name()
+            break
+    plt.rcParams.update({"axes.unicode_minus": False, "font.size": 9})
+    j, idx, ma, t = r["j"], r["idx"], r["ma"], r["t"]
+    fac = p["factor"][idx, j]
+    o, h, l, c = (p[k][idx, j] / fac for k in ("open", "high", "low", "close"))   # unadjusted prices on the chart
+    v = p["volume"][idx, j]
+    ma = ma / fac
+    a, b = max(t - 180, 0), t
+    x = np.arange(b - a + 1)
+    fig, (ax, axv) = plt.subplots(2, 1, figsize=(10, 4.2), sharex=True, gridspec_kw={"height_ratios": [3, 1.3]})
+    for i in range(a, b + 1):
+        col = "#d63031" if c[i] >= o[i] else "#20a162"
+        ax.vlines(i - a, l[i], h[i], color=col, lw=0.6)
+        ax.add_patch(plt.Rectangle((i - a - 0.35, min(o[i], c[i])), 0.7, max(abs(c[i] - o[i]), (h[i] - l[i]) * 0.02 + 1e-9), color=col))
+        axv.bar(i - a, v[i], color=col, width=0.7)
+    ax.plot(x, ma[a:b + 1], color="#0984e3", lw=1.1, label="MA60")
+    ymin, ymax = np.nanmin(l[a:b + 1]), np.nanmax(h[a:b + 1])
+    sig = r["kind"] == "signal"
+    q0 = (t if sig else t + 1) - 5          # the 5 days whose mean volume is measured
+    e0 = t - 1 if sig else t
+    for axx in (ax, axv):
+        axx.axvspan(q0 - a - 0.5, e0 - a + 0.5, color="#6c5ce7", alpha=0.10)
+    axv.axhline(r["peak"] * r["q"]["q_peak"], color="#6c5ce7", lw=0.8, ls="--")
+    axv.text(1, axv.get_ylim()[1] * 0.92, f"虚线 = 一年高峰 20 日均量的 {r['q']['q_peak']*100:.0f}%", fontsize=7.5,
+             color="#6c5ce7", va="top")
+    axv.hlines(r["vb"], q0 - a - 0.5, e0 - a + 0.5, color="#6c5ce7", lw=1.6)
+    axv.text(q0 - a - 1, axv.get_ylim()[1] * 0.92, f"买点前 5 天均量 = 高峰的 {r['q_peak']*100:.0f}%", fontsize=7.5,
+             color="#6c5ce7", ha="right", va="top")
+    r0 = r["run0"]
+    ax.text(r0 - a - 1, l[r0] - (ymax - ymin) * 0.04, f"{r['run']}根阴线 →", fontsize=7.5, color="#20a162",
+            ha="right", va="top")
+    if sig:
+        ax.annotate("买点", (b - a, l[b]), (b - a, l[b] - (ymax - ymin) * 0.09), ha="center", fontsize=8,
+                    color="#d63031", fontweight="bold", arrowprops=dict(arrowstyle="->", color="#d63031", lw=0.8))
+    ax.set_ylim(ymin - (ymax - ymin) * 0.14, ymax * 1.04)
+    ax.legend(loc="upper right", frameon=False, fontsize=8)
+    ticks = list(range(0, b - a + 1, max((b - a) // 6, 1)))
+    axv.set_xticks(ticks, [p["dates"][idx[a + k]].strftime("%Y-%m-%d") for k in ticks])
+    axv.set_yticks([])
+    for s_ in (ax, axv):
+        s_.spines[["top", "right"]].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(path, dpi=110)
+    plt.close(fig)
+
+
+def criteria_ex(r):
+    q = r["q"]
+    ok = lambda b: ("ok", "✓") if b else ("no", "✗")
+    out = [(*ok(True), f"深跌：比一年最高价低 {-r['dd']*100:.0f}%（要求 ≥ {-q['dd']*100:.0f}%）"),
+           (*ok(True), f"在 60 日线下方：最近 60 天有 {r['below']} 天收盘在线下（要求 ≥ {q['below_min']} 天）"),
+           (*ok(True), f"极度缩量：买点前 5 天均量 = 一年最高 20 日均量的 {r['q_peak']*100:.0f}%（要求 ≤ {q['q_peak']*100:.0f}%）；"
+                       f"在最近 120 天中排最低 {r['q_rank']*100:.0f}%（要求 ≤ {q['q_pct']*100:.0f}%）"),
+           (*ok(True), f"阴线：连续 {r['run']} 根阴线，创 20 天新低（要求 ≥ {q['run_min']} 根）")]
+    if r["kind"] == "signal":
+        out.append((*ok(True), f"买点：今天收阳线，收盘低于 60 日线 {-r['below_ma60']*100:.1f}%"))
+    else:
+        out.append(("wait", "…", "买点：还差一根阳线，收盘必须在 60 日线下方"))
+    return out
+
+
+def page(day, n_checked, rows, out, max_cards=20):
     def card(r):
         sig, k = r["kind"] == "signal", r["r"]["k"]
         why = (f"今天是第 {k} 个底，前面 {r['down_candles']} 根缩量阴线，今天收阳线（收盘在 60 日线下方）" if sig else
                f"第 {k} 个底已有 {r['down_candles']} 根缩量阴线，还差一根阳线（收盘须在 60 日线下方）")
-        tag = ("" if r["tier"] == "strict" else "宽松版") + ("买点" if sig else "观察")
+        tag = "严格版" + ("买点" if sig else "观察")
         crit = "".join(f'<li class="{c}"><span>{m}</span>{t}</li>' for c, m, t in criteria(r))
         return f'''<article class="card"><header><span class="badge {"buy" if sig else "watch"}">{tag}</span>
 <h3>{r["code"]}</h3></header><p class="why">{why}</p>
@@ -373,15 +520,44 @@ def page(day, n_checked, rows, out):
 <dl><div><dt>收盘价</dt><dd>{r["close_px"]:.2f}</dd></div><div><dt>60 日线</dt><dd>{r["ma60_px"]:.2f}</dd></div>
 <div><dt>低于 60 日线</dt><dd>{r["below_ma60"]*100:.1f}%</dd></div><div><dt>放量站上 60 日线</dt><dd>{r["d1_date"]}</dd></div>
 <div><dt>跌回 60 日线下方</dt><dd>{r["stretch_start"]}</dd></div><div><dt>{k} 个底</dt><dd>{r["bottoms"].replace(";", "<br>")}</dd></div></dl></article>'''
+
+    def card_ex(r):
+        sig = r["kind"] == "signal"
+        why = (f"买点前 5 天均量只有一年高峰的 {r['q_peak']*100:.0f}%，{r['run']} 根阴线后今天收阳线（收盘在 60 日线下方）" if sig else
+               f"5 天均量只有一年高峰的 {r['q_peak']*100:.0f}%，已有 {r['run']} 根阴线，还差一根阳线（收盘须在 60 日线下方）")
+        tag = "例子版" + ("买点" if sig else "观察")
+        crit = "".join(f'<li class="{c}"><span>{m}</span>{t}</li>' for c, m, t in criteria_ex(r))
+        return f'''<article class="card"><header><span class="badge {"buy" if sig else "watch"}">{tag}</span>
+<h3>{r["code"]}</h3></header><p class="why">{why}</p>
+<img loading="lazy" src="charts/{r["code"]}.png" alt="{r["code"]} 日K线">
+<ul class="crit">{crit}</ul>
+<dl><div><dt>收盘价</dt><dd>{r["close_px"]:.2f}</dd></div><div><dt>60 日线</dt><dd>{r["ma60_px"]:.2f}</dd></div>
+<div><dt>低于 60 日线</dt><dd>{r["below_ma60"]*100:.1f}%</dd></div><div><dt>比一年高点</dt><dd>{r["dd"]*100:.0f}%</dd></div></dl></article>'''
+
+    def table_ex(rs):
+        if not rs:
+            return ""
+        tr = "".join(f"<tr><td>{r['code']}</td><td>{r['close_px']:.2f}</td><td>{r['q_peak']*100:.0f}%</td><td>{r['run']}</td>"
+                     f"<td>{r['dd']*100:.0f}%</td><td>{r['below_ma60']*100:.1f}%</td></tr>" for r in rs)
+        return (f'<p class="small">另外 {len(rs)} 只（缩量程度较弱，不画图）：</p><div class="tbl"><table><tr><th>代码</th><th>收盘价</th>'
+                f'<th>5 天均量占高峰</th><th>阴线</th><th>比一年高点</th><th>低于 60 日线</th></tr>{tr}</table></div>')
+
+    def cards(rs, empty):
+        if not rs:
+            return f'<p class="empty">{empty}</p>'
+        f = lambda r: card_ex(r) if r["tier"] == "example" else card(r)
+        return "".join(map(f, rs[:max_cards])) + table_ex(rs[max_cards:])
+
     sig = [r for r in rows if r["kind"] == "signal" and r["tier"] == "strict"]
-    rsig = [r for r in rows if r["kind"] == "signal" and r["tier"] == "relaxed"]
-    wat = [r for r in rows if r["kind"] == "watch"]
+    esig = [r for r in rows if r["kind"] == "signal" and r["tier"] == "example"]
+    wat = [r for r in rows if r["kind"] == "watch" and r["tier"] == "strict"]
+    ewat = [r for r in rows if r["kind"] == "watch" and r["tier"] == "example"]
     tpl = (Path(__file__).parent / "template.html").read_text()
     html = (tpl.replace("{{DAY}}", day).replace("{{N}}", f"{n_checked:,}").replace("{{NB}}", str(len(sig)))
-            .replace("{{NR}}", str(len(rsig))).replace("{{NW}}", str(len(wat)))
+            .replace("{{NE}}", str(len(esig))).replace("{{NW}}", str(len(wat) + len(ewat)))
             .replace("{{BUYS}}", "".join(map(card, sig)) or '<p class="empty">今天没有股票符合全部规则。</p>')
-            .replace("{{RBUYS}}", "".join(map(card, rsig)) or '<p class="empty">今天没有股票符合宽松版规则。</p>')
-            .replace("{{WATCH}}", "".join(map(card, wat)) or '<p class="empty">暂无。</p>'))
+            .replace("{{EBUYS}}", cards(esig, "今天没有股票符合例子版规则。"))
+            .replace("{{WATCH}}", "".join(map(card, wat)) + cards(ewat, "") if wat or ewat else '<p class="empty">暂无。</p>'))
     (out / "index.html").write_text(html)
 
 
@@ -400,24 +576,29 @@ def main():
     mkey = np.asarray(D.year * 12 + D.month)
     wkey = np.asarray((D - pd.Timestamp("2000-01-03")).days // 7)
     checked = np.isfinite(p["close"][T])
-    rows = []
-    for tier, q in TIERS.items():
-        seen = {r["code"] for r in rows}
-        rows += [{**r, "tier": tier} for j in np.flatnonzero(checked)
-                 if (r := check(int(j), p, mkey, wkey, q)) and r["code"] not in seen]
-    rows.sort(key=lambda r: (r["kind"] != "signal", r["tier"] != "strict", r["code"]))
-    keep = ["code", "tier", "kind", "close_px", "ma60_px", "below_ma60", "stretch_start", "d1_date", "bottoms", "down_candles", "d3viol"]
+    rows = [{**r, "tier": "strict"} for j in np.flatnonzero(checked) if (r := check(int(j), p, mkey, wkey, RULES))]
+    seen = {r["code"] for r in rows}
+    rows += [r for j in np.flatnonzero(checked) if (r := check_ex(int(j), p)) and r["code"] not in seen]
+    rows.sort(key=lambda r: (r["kind"] != "signal", r["tier"] != "strict", r.get("q_peak", 0), r["code"]))
+    keep = ["code", "tier", "kind", "close_px", "ma60_px", "below_ma60", "stretch_start", "d1_date", "bottoms", "down_candles",
+            "d3viol", "q_peak", "dd"]
     Path(a.history).mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([{k: r[k] for k in keep} for r in rows], columns=keep).to_csv(Path(a.history) / f"{day}.csv", index=False)
+    pd.DataFrame([{k: r.get(k, "") for k in keep} for r in rows], columns=keep).to_csv(Path(a.history) / f"{day}.csv", index=False)
     if not a.no_page:
         out = Path(a.out)
         (out / "charts").mkdir(parents=True, exist_ok=True)
+        n = {}
         for r in rows:
-            chart(r, p, out / "charts" / f"{r['code']}.png")
+            key = (r["tier"], r["kind"])
+            n[key] = n.get(key, 0) + 1
+            if r["tier"] == "strict":
+                chart(r, p, out / "charts" / f"{r['code']}.png")
+            elif n[key] <= 20:
+                chart_ex(r, p, out / "charts" / f"{r['code']}.png")
         page(day, int(checked.sum()), rows, out)
     print(f"{day}: checked {checked.sum()}, " + ", ".join(
         f"{tier} signal {sum(r['kind'] == 'signal' and r['tier'] == tier for r in rows)} "
-        f"watch {sum(r['kind'] == 'watch' and r['tier'] == tier for r in rows)}" for tier in TIERS))
+        f"watch {sum(r['kind'] == 'watch' and r['tier'] == tier for r in rows)}" for tier in ("strict", "example")))
 
 
 if __name__ == "__main__":

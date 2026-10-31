@@ -11,10 +11,13 @@ wave, a volume breakout above MA60, a low-volume fall back below it, shrinking d
 4+ low-volume down candles then an up candle at the 3rd bottom below MA60), and publishes the result page via GitHub
 Pages. It also lists "watch" stocks that need only the up candle. Daily results are kept in `history/<date>.csv`.
 
-A second tier, 宽松版 (relaxed, `RULES_R`), keeps the same structure with looser rules: no weekly rule and no D2;
-monthly bodies 1.2x; the 2nd or 3rd bottom; 3+ low-volume down candles; a hill of 4+ up candles or +15%; breakout volume
-1.5x. The page lists strict signals first, then relaxed signals, then the watch list for both tiers. The `tier` column in
-the history CSV says which tier a row is from, and a stock in the strict list is not repeated in the relaxed list.
+A second tier, 例子版 (example tier, `RULES_E`, since 2026-10-31; it replaced the 宽松版 relaxed tier), is rebuilt
+from the author's 10 example stocks. The key rule is very low volume before the buy: close >= 30% below the 250-day
+high; >= 30 of the last 60 closes below MA60; the mean volume of the 5 days before today <= 20% of the highest 20-day
+mean volume of the last 250 days, and in the lowest 15% of its last 120 values; >= 2 down candles in a row that made
+the 20-day low; today an up candle that closes at or below MA60. Only the first signal in 20 days counts. It finds 6 of
+the 10 examples. Backtest 2008-2026: about 1,800 signals a year (bursty), +0.2 / +0.7 pp vs the market over 20 / 60
+days, but only about half of the months beat the market, so there is no stable edge.
 
 Run locally: `python ma60.py --qlib <qlib_data dir> --out site` (`--asof YYYY-MM-DD` screens a past day).
 
